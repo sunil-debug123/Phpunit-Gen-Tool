@@ -1,0 +1,10 @@
+{
+    "name": "drupal/phpunit_gen_tool",
+    "description": "'Provides a Drush command to generate PHPUnit test files.",
+    "type": "drupal-module",
+    "license": "GPL-2.0-or-later",
+    "require-dev": {
+        "drush/drush": "^11.6",
+        "phpunitgen/console": "^2.0"
+    }
+}

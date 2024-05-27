@@ -1,0 +1,5 @@
+name: 'PHPUnit Generation Tool'
+type: module
+description: 'Provides a Drush command to generate PHPUnit test files.'
+package: Development
+core_version_requirement: ^8 || ^9 || ^10

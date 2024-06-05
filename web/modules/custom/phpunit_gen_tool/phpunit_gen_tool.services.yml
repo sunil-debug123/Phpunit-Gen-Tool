@@ -1,0 +1,5 @@
+services:
+  phpunit_gen_tool.commands:
+    class: Drupal\phpunit_gen_tool\Commands\PhpUnitGenToolCommands
+    tags:
+      - { name: drush.command }

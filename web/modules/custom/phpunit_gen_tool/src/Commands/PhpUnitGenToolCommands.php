@@ -2,12 +2,16 @@
 
 namespace Drupal\phpunit_gen_tool\Commands;
 
+use Drupal\phpunit_gen_tool\Constants\Constants;
+use Drupal\phpunit_gen_tool\Parsers\CodeParser;
 use Drush\Commands\DrushCommands;
 
 /**
  * Class for generate Test using Drush.
  */
 class PhpUnitGenToolCommands extends DrushCommands {
+
+  use OutputCommand;
 
   /**
    * Generate PHPUnit test for a given file.
@@ -18,40 +22,116 @@ class PhpUnitGenToolCommands extends DrushCommands {
    * @command phpunitgen:generate
    */
   public function generateTest($file_path) {
-    $start_time = microtime(TRUE);
-    $this->output()->writeln("<info>Generation is started...</info>");
-
     $drupal_root = \Drupal::root();
     $cleaned_file_path = preg_replace('/^\.\//', '', $file_path);
     $cleaned_file_path = preg_replace('/^.*?\//', '', $cleaned_file_path);
-    $relative_path = $drupal_root . '/' . $cleaned_file_path;
-    if (!file_exists($relative_path)) {
-      $this->logger()->error(dt('File does not exist: @file_path', ['@file_path' => $relative_path]));
+    $original_file_path = $drupal_root . '/' . $cleaned_file_path;
+
+    // Set initial counts to zero.
+    $sourcesCount = 0;
+    $successesCount = 0;
+    $warningsCount = 0;
+    $errorsCount = 0;
+    $warnings = [];
+    $errors = [];
+
+    if (!file_exists($original_file_path)) {
+      $errorsCount++;
+      $errors[] = "No source to generate tests for: $file_path";
+      $this->printResults($sourcesCount, $successesCount, $warningsCount, $errorsCount, $warnings, $errors);
       return;
     }
 
+    // Increment sources count.
+    $sourcesCount++;
+    // Parse and validate the file.
+    $parser = new CodeParser();
+    $result = $parser->parseFile($original_file_path);
+    if ($result[Constants::STATUS_KEY] == Constants::ERROR_STATUS) {
+      $errorsCount++;
+      $errors[] = $result[Constants::MESSAGE_KEY];
+      $this->printResults($sourcesCount, $successesCount, $warningsCount, $errorsCount, $warnings, $errors);
+      return;
+    }
     // Extract the class name and namespace from the file.
-    $class_info = $this->getClassInfo($relative_path);
+    $class_info = $this->getClassInfo($original_file_path);
 
     if (!$class_info) {
-      $this->logger()->error(dt('Unable to extract class information from the file: @file_path', ['@file_path' => $relative_path]));
+      $errorsCount++;
+      $errors[] = "Unable to extract class information from the file: $original_file_path";
+      $this->printResults($sourcesCount, $successesCount, $warningsCount, $errorsCount, $warnings, $errors);
       return;
     }
 
-    $test_code = $this->generateTestCode($class_info['namespace'], $class_info['class_name'], $relative_path);
-
+    // Generate test code.
+    $test_code = $this->generateTestCode($class_info['namespace'], $class_info['class_name'], $original_file_path);
     $test_file_path = $this->getTestFilePath($class_info['class_name']);
-    file_put_contents($test_file_path, $test_code);
-    $end_time = microtime(TRUE);
-    $execution_time = number_format(($end_time - $start_time), 3);
-    $this->logger()->success(dt('Test generated successfully: @test_file_path', ['@test_file_path' => $test_file_path]));
-    $this->output()->writeln("<info>Generation is finished!</info>");
-    $this->output()->writeln("<info>1 source(s) identified</info>");
-    $this->output()->writeln("<info>1 success(es)</info>");
-    $this->output()->writeln("<info>0 warning(s)</info>");
-    $this->output()->writeln("<info>0 error(s)</info>");
-    $this->output()->writeln("<info>Execution time: $execution_time s</info>");
-    $this->output()->writeln("<info>Memory usage: " . memory_get_peak_usage() / 1024 / 1024 . " MB</info>");
+
+    if ($test_file_path && $test_code) {
+      file_put_contents($test_file_path, $test_code);
+    }
+    else {
+      $warningsCount++;
+      $warnings[] = "Test file path or generated test code is invalid for class: {$class_info['class_name']}";
+    }
+
+    // If test generation is successful, increment successes count.
+    if (file_exists($test_file_path)) {
+      $successesCount++;
+    }
+
+    $executionTime = microtime(TRUE) - $_SERVER["REQUEST_TIME_FLOAT"];
+    $this->printResults($sourcesCount, $successesCount, $warningsCount, $errorsCount, $warnings, $errors, $executionTime);
+  }
+
+  /**
+   * Print the results of the test generation process.
+   *
+   * @param int $sourcesCount
+   *   The number of sources identified.
+   * @param int $successesCount
+   *   The number of successful generations.
+   * @param int $warningsCount
+   *   The number of warnings.
+   * @param int $errorsCount
+   *   The number of errors.
+   * @param array $warnings
+   *   The array of warning messages.
+   * @param array $errors
+   *   The array of error messages.
+   * @param float|null $executionTime
+   *   The execution time.
+   */
+  protected function printResults($sourcesCount, $successesCount, $warningsCount, $errorsCount, $warnings, $errors, $executionTime = NULL) {
+    $this->writeOutput();
+    $this->writeOutput('Generation is finished!', NULL, TRUE);
+    $this->writeOutput();
+    $this->writeOutput($sourcesCount . ' source(s) identified', NULL, TRUE);
+    $this->success($successesCount . ' success(es)');
+    $this->warning($warningsCount . ' warning(s)');
+    $this->error($errorsCount . ' error(s)');
+
+    // Print all warnings.
+    if (!empty($warnings)) {
+      $this->warning("Warnings:");
+      foreach ($warnings as $warning) {
+        $this->writeOutput("- $warning");
+      }
+    }
+
+    // Print all errors.
+    if (!empty($errors)) {
+      $this->writeOutput();
+      $this->error("Errors:");
+      foreach ($errors as $error) {
+        $this->writeOutput("- $error");
+      }
+    }
+
+    $this->writeOutput();
+    if ($executionTime !== NULL) {
+      $this->writeOutput("Execution time: " . number_format($executionTime, 3) . " s");
+    }
   }
 
   /**
@@ -65,16 +145,12 @@ class PhpUnitGenToolCommands extends DrushCommands {
    */
   protected function getClassInfo($file_path) {
     $contents = file_get_contents($file_path);
-
     $namespace = '';
-    $class_name = '';
+    // Get the class name.
+    $class_name = basename($file_path, '.php');
 
     if (preg_match('/namespace\s+([^;]+);/', $contents, $matches)) {
       $namespace = $matches[1];
-    }
-
-    if (preg_match('/class\s+(\w+)/', $contents, $matches)) {
-      $class_name = $matches[1];
     }
 
     if ($namespace && $class_name) {

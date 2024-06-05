@@ -4,7 +4,7 @@ namespace App\Models\Tests;
 
 use PHPUnit\Framework\TestCase;
 
-class isTest extends TestCase {
+class PersonTest extends TestCase {
 
   public function setUp(): void {
     parent::setUp();
